@@ -1,0 +1,10 @@
+{
+    "bearer": "",
+    "webhook_url": "https://discord.com/api/webhooks/1201542312988258446/V9CFhePGlCAWbtuqi5JopgV7PVy1ze0L14gFV0FdUGmgGKNyTAkfOqBMMJCRz3UBAdkO",
+    "serverID": "5594379",
+    "minAccountAge": 15,
+    "totalServers": 5,
+    "hours": 50,
+    "firstJoinAge": 1
+}
+
