@@ -1,0 +1,397 @@
+import requests
+import json
+from datetime import datetime, timezone
+import time
+import os
+import sys
+import re
+import discord.utils
+
+
+class Api(object):
+    def __init__(self, steamKey, discordKey):
+        self.steamKey = steamKey
+        self.discordKey = discordKey
+
+    def fetch_messages(self, channel_id, guild_id, before, limit):
+        url = f"https://discord.com/api/v9/channels/{channel_id}/messages?before={before}&limit={limit}"
+        headers = {
+            "authorization": self.discordKey,
+        }
+        response = requests.get(url, headers=headers)
+        if response.status_code == 429:
+            retry_after = 70
+            print(f"Rate limited. Retrying after {retry_after} seconds.")
+            time.sleep(retry_after)
+            return self.fetch_messages(channel_id, guild_id, before, limit)
+        return response.json()
+
+    def get_data(self, guild, channel, name, offset):
+        print("GETTING DATA")
+        url = "https://discord.com/api/v9/guilds/" + guild + "/messages/search"
+        params = {
+            "channel_id": channel,
+            "content": name,
+            "include_nsfw": "true",
+            "offset": offset
+        }
+        headers = {
+            "authorization": self.discordKey
+        }
+        return requests.get(url, headers=headers, params=params).json()
+
+    def get_steam(self, steamID):
+        url = f"http://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key={self.steamKey}&steamids={steamID}"
+        return requests.get(url=url).json()
+
+
+class Utils(object):
+    @staticmethod
+    def days_difference(date_str):
+        given_date = datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+        current_date = datetime.utcnow().replace(tzinfo=timezone.utc)
+        difference = (current_date - given_date).days
+        return difference
+
+    @staticmethod
+    def time_difference(time_str):
+        given_time = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        current_time = datetime.now(timezone.utc)
+        time_diff = (current_time - given_time).total_seconds() / (3600 * 24)
+        return time_diff
+
+    @staticmethod
+    def getSteamIDS(text):
+        steam_id_pattern = re.compile(r'https://steamcommunity\.com/profiles/(\d+)')
+        steam_ids = steam_id_pattern.findall(text)
+        return steam_ids
+
+    @staticmethod
+    def get():
+        current_time = datetime.utcnow()
+        snowflake_id = discord.utils.time_snowflake(current_time)
+        return snowflake_id
+
+    @staticmethod
+    def time_string_to_snowflake_id(time_str):
+        time_obj = datetime.fromisoformat(time_str)
+        snowflake_id = discord.utils.time_snowflake(time_obj)
+        return snowflake_id
+    
+    @staticmethod
+    def timestamp_to_epoch(timestamp):
+        time_obj = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        epoch_time = int(time_obj.timestamp())
+        return epoch_time
+
+    @staticmethod
+    def epoc_to_snowflake(epoch_time):
+        snowflake_id = discord.utils.time_snowflake(epoch_time)
+        return snowflake_id
+    
+    @staticmethod
+    def epoc_timestamp_dif(epoch_time, timestamp):
+        epoch_datetime = datetime.utcfromtimestamp(epoch_time).replace(tzinfo=timezone.utc)
+        timestamp_datetime = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        time_difference = timestamp_datetime - epoch_datetime
+        return time_difference.days
+
+
+class FileHandler(object):
+    @staticmethod
+    def read_json(fileDir):
+        with open(fileDir, 'r') as f:
+            data = f.read()
+        return json.loads(data)
+
+    @staticmethod
+    def write_json(fileDir, data):
+        with open(fileDir, 'w') as f:
+            f.write(json.dumps(data))
+
+    @staticmethod
+    def list_dir(dir):
+        files = os.listdir(dir)
+        return files
+
+    @staticmethod
+    def read_file(fileDir):
+        with open(fileDir, 'r') as f:
+            data = f.read()
+        return data
+
+    @staticmethod
+    def write_file(fileDir, data):
+        with open(fileDir, "w", encoding="utf-8") as f:
+            f.write(data)
+
+class explored(object):
+    def __init__(self):
+        self.data = self.exists()
+        self.count = 0
+
+    def exists(self):
+        if "explored0.json" in FileHandler.list_dir(os.getcwd()):  # Lists files in current directory
+            return FileHandler.read_json("explored0.json")
+        else:
+            self.no_config()
+
+    def no_config(self):
+        print("Explored json file has now been created!")
+        FileHandler.write_file("explored0.json", '{}')
+        time.sleep(3)
+        sys.exit()
+
+    def save(self):
+        if self.count == 0:
+            self.count += 1
+        else:
+            self.count = 0
+        FileHandler.write_json(f"explored{self.count}.json", self.data)
+
+
+class config(object):
+    def __init__(self):
+        self.data = self.exists()
+        self.steamKey = self.data["steamKey"]
+        self.discordKey = self.data["discordKey"]
+        self.name = self.data["searchQuery"]
+        self.guildID = self.data["guildID"]
+        self.channelID = self.data["channelID"]
+
+    def exists(self):
+        if "configGB.json" in FileHandler.list_dir(os.getcwd()):  # Lists files in current directory
+            return FileHandler.read_json("configGB.json")
+        else:
+            self.no_config()
+
+    def no_config(self):
+        print("Copy config file from github!")
+        FileHandler.write_json("configGB.json", "")
+        time.sleep(3)
+        sys.exit()
+
+
+def find_banned_accounts(data, exploredIDs, bannedInfo):
+    bannedString = ""
+    for i, v in bannedInfo.items():
+        bannedString += f"{i} {v[0]} {v[1]}\n"
+    FileHandler.write_file("output.txt", bannedString)
+    for message in data:
+        try:
+            fields = message["embeds"][0]["fields"]
+        except:
+            continue
+        print(fields)
+        print(bannedInfo)
+
+        for i in fields:
+            currentField = i["value"]
+            currentIDs = Utils.getSteamIDS(currentField)
+            for id in currentIDs:
+                if id not in exploredIDs:
+                    info = api.get_steam(id)["players"][0]
+                    exploredIDs[id] = 1
+                    if info["NumberOfGameBans"] - info["NumberOfVACBans"] >= 1 and info["DaysSinceLastBan"] < Utils.time_difference(message["timestamp"]):
+                        bannedInfo[id] = (info["DaysSinceLastBan"], info["NumberOfGameBans"])
+
+
+
+
+def recentBans():
+    before = Utils.get()
+    while True:
+        data = api.fetch_messages(config.channelID, config.guildID, before,100)
+        if len(data) == 0:
+            print(data)
+            break
+
+        t = data[-1]
+        t = t["timestamp"]
+        before = Utils.time_string_to_snowflake_id(t)
+        find_banned_accounts(data, exploredIDs, bannedInfo)
+
+    bannedString = ""
+    for i, v in bannedInfo.items():
+        bannedString += f"{i} {v[0]} {v[1]}\n"
+    FileHandler.write_file("output.txt", bannedString)
+    print(data)
+
+def addSteamId():
+    before = Utils.get()
+    c = 0
+    while True:
+        data = api.fetch_messages(config.channelID, config.guildID, before, 100)
+        if len(data) == 0:
+            break
+
+        t = data[-1]
+        t = t["timestamp"]
+        before = Utils.time_string_to_snowflake_id(t)
+        for message in data:
+            usersAdded = set()
+            try:
+                fields = message["embeds"][0]["fields"]
+            except:
+                continue
+            for i in fields:
+                currentField = i["value"]
+                currentIDs = Utils.getSteamIDS(currentField)
+                for id in currentIDs:
+                    if not explored.data.get(id) and id not in usersAdded:
+                        c += 1
+                        if c % 100 == 0:
+                            print(f"Currently added : {c}")
+                        current = message["timestamp"]
+                        explored.data[id] = {
+                            "gamebanned": False,
+                            "gamebannedDate": None,
+                            "lastCheckedGb": 1272959521,
+                            "bansAtlas": 0,
+                            "lastBanAtlas":1272959521,
+                            "lastSeen": current,
+                            "eventMentions":1
+                        }
+                    else:
+                        explored.data[id]["eventMentions"] += 1
+                        if message["timestamp"] < explored.data[id]["lastSeen"]:
+                            explored.data[id]["lastSeen"] = message["timestamp"]
+                    usersAdded.add(id)
+        explored.save()
+
+def checkSteamIds():
+    c = 0
+    bans = 0
+    for id, data in explored.data.items():
+        c += 1
+        if c % 100 == 0:
+            explored.save()
+        if c%10 == 0:
+            print(f"Current accounts checked : {str(c)} / {len(explored.data)}, {bans} Bans found")
+
+        if data["gamebanned"] == False and time.time()-data["lastCheckedGb"] > 432000: #432000 is 5 days
+            try:
+                req = api.get_steam(id)
+                info = req["players"][0]
+            except Exception as e:
+                print(e)
+                print(req)
+                print("Error occured waiting 65s")
+                time.sleep(65)
+            data["lastCheckedGb"] = time.time()
+            if info["NumberOfGameBans"] - info["NumberOfVACBans"] >= 1 and info["DaysSinceLastBan"] < Utils.time_difference(explored.data[id]["lastSeen"]):
+                data["gamebanned"] = True
+                bans += 1
+                data["gamebannedDate"] = time.time() - 3600*24*info["DaysSinceLastBan"]
+
+    explored.save()
+
+def makeBanList():
+    ar = []
+    for id, data in explored.data.items():
+        if data["gamebanned"] == True:
+            p = [id, data["gamebannedDate"], data["lastSeen"], data["eventMentions"]]
+            ar.append(p)
+    #byLastSeen = sorted(ar, key=lambda x: x[2], reverse=True)
+    byGameBannedDate = sorted(ar, key=lambda x: x[1], reverse=True)
+    print(byGameBannedDate)
+    #byEventWins = sorted(ar, key=lambda x: x[3], reverse=True)
+    st = ""
+    for a,b,c,d in byGameBannedDate:
+        t = (time.time() - b)/3600
+        if t > 4033330: #older than 14d
+            continue
+        t = round(t, 1)
+        st += f"{a} {t} hours, {d} event wins\n"
+    FileHandler.write_file("banListOutput.txt", st)
+
+def topEvents():
+    ar = []
+    for id, data in explored.data.items():
+        ar.append([id, data["eventMentions"], data["lastSeen"], data["bansAtlas"], data["lastBanAtlas"]])
+    ar = sorted(ar, key=lambda x: x[1], reverse=True)
+    count = 1
+    for i in ar[0:10]:
+        if i[4] == 1272959521:
+            t = "None"
+        else:
+            t = str(round((time.time() -i[4])/(3600*24)))
+            t = f"{t} Days since last atlas ban"
+        print(f"#{count} {i[0]} with {i[1]} mentions. Last seen: {i[2]}. {i[3]} Atlas bans. {t}")
+        count += 1
+
+def loadBans():
+    #official atlas discord and ban channel
+    guild = "870207685541363732"
+    channel = "923832290222686249"
+    upto = 1707408589
+    before = Utils.get()
+    count = 0
+    while True:
+        data = api.fetch_messages(channel, guild, before, 100)
+        if len(data) == 0:
+            break
+        t = data[-1]
+        t = t["timestamp"]
+        before = Utils.time_string_to_snowflake_id(t)
+
+        for message in data:
+            try:
+                fields = message["embeds"][0]["fields"]
+            except:
+                continue
+
+            count += 1
+            if count % 100 == 0:
+                print("Currently added :",count)
+            if count % 200 == 0:
+                explored.save()
+            found = False   
+            for i in fields:
+                if found == True:
+                    break #stop repeat values
+                currentField = i["value"]
+                currentIDs = Utils.getSteamIDS(currentField)
+                for id in currentIDs:
+                    found = True
+                    if explored.data.get(id):
+                        explored.data[id]["bansAtlas"] += 1
+                        try:
+                            if Utils.timestamp_to_epoch(message["timestamp"]) > explored.data[id]["lastBanAtlas"]:
+                                explored.data[id]["lastBanAtlas"] = Utils.timestamp_to_epoch(message["timestamp"])
+                        except:
+                            explored.data[id]["lastBanAtlas"] = 1272959521
+                            if Utils.timestamp_to_epoch(message["timestamp"]) > explored.data[id]["lastBanAtlas"]:
+                                explored.data[id]["lastBanAtlas"] = Utils.timestamp_to_epoch(message["timestamp"])
+                    
+
+    
+        if Utils.epoc_timestamp_dif(upto, t) < 0:
+            break
+        
+
+
+config = config()
+api = Api(config.steamKey, config.discordKey)
+explored = explored()
+global exploredIDs
+global bannedInfo
+exploredIDs = dict()
+bannedInfo = dict()
+
+option = int(input("1. Recent Bans, 2. Add steam ids, 3: Check steam ids, 4: Add atlas bans, 5: Check explored length, 6: Make ban list, 7: Find best roamers, : "))
+if option == 1:
+    recentBans()
+elif option == 2:
+    addSteamId()
+elif option == 3:
+    checkSteamIds()
+elif option == 4:
+    loadBans()
+elif option == 5:
+    print(len(explored.data))
+elif option == 6:
+    makeBanList()
+elif option == 7:
+    topEvents()
+
